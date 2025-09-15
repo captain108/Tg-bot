@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import openpyxl
+import requests
 from telethon import TelegramClient, functions, types
 from telethon.sessions import StringSession
 from telegram import (
@@ -171,13 +172,18 @@ if __name__ == '__main__':
     import logging
     logging.basicConfig(level=logging.INFO)
 
-    # Bind to Render port
-    port = int(os.getenv('PORT', 8443))
+    PORT = int(os.getenv('PORT', '8443'))
+    HOST = '0.0.0.0'
+    WEBHOOK_URL = f"https://your-render-app.onrender.com/{os.getenv('BOT_TOKEN')}"
 
     app = ApplicationBuilder().token(os.getenv('BOT_TOKEN')).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 
-    print(f'Bot is running on port {port}...')
-    app.run_polling()
+    print(f"Running webhook on {HOST}:{PORT}")
+    app.run_webhook(
+        listen=HOST,
+        port=PORT,
+        webhook_url=WEBHOOK_URL
+    )
