@@ -185,5 +185,5 @@ if __name__ == '__main__':
     app.run_webhook(
         listen=HOST,
         port=PORT,
-        WEBHOOK_URL = f"https://tg-bot-1jau.onrender.com/{BOT_TOKEN}"
+        webhook_url = f"https://tg-bot-1jau.onrender.com/{BOT_TOKEN}"
     )
