@@ -17,18 +17,17 @@ API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 STRING_SESSION = os.getenv('STRING_SESSION')
-PHONE_NUMBER = os.getenv('PHONE_NUMBER')  # Optional, but recommended
+PHONE_NUMBER = os.getenv('PHONE_NUMBER')
 
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 CONFIG_FILE = 'config.json'
 
-# Helper functions
 def load_config():
     if not os.path.exists(CONFIG_FILE):
         return {
             "tick_style": "✅",
-            "last_summary": {"total_checked":0, "registered_count":0, "non_registered_count":0},
+            "last_summary": {"total_checked": 0, "registered_count": 0, "non_registered_count": 0},
             "non_registered_numbers": []
         }
     with open(CONFIG_FILE, 'r') as f:
@@ -38,7 +37,6 @@ def save_config(config):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=4)
 
-# Start Command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config = load_config()
     summary = config['last_summary']
@@ -66,21 +64,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(message, reply_markup=reply_markup)
 
-# Button Handler
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     config = load_config()
 
     if query.data == 'upload':
-        await query.message.reply_text("📁 Please send the XLSX file containing phone numbers (one per row).")
+        await query.message.reply_text("📁 Please send the XLSX file containing phone numbers (one number per row in first column).")
     elif query.data == 'get_txt':
         txt_path = 'non_registered_numbers.txt'
         with open(txt_path, 'w') as f:
             for num in config['non_registered_numbers']:
                 f.write(f"{num}\n")
         await query.message.reply_document(document=InputFile(txt_path),
-                                           caption="📄 Non-Registered Numbers TXT File.")
+                                           caption="📄 Non-Registered Numbers TXT file.")
         os.remove(txt_path)
     elif query.data == 'toggle_style':
         config['tick_style'] = '✔️' if config['tick_style'] == '✅' else '✅'
@@ -89,12 +86,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'help':
         await query.message.reply_text(
             "📚 Usage Guide:\n"
-            "📥 Upload a XLSX file (one number per row in the first column)\n"
-            "📄 Download TXT file of non-registered numbers\n"
+            "📥 Upload a XLSX file (one phone number per row in the first column)\n"
+            "📄 Download Non-Registered TXT file\n"
             "⚙️ Toggle between ✅ and ✔️ tick styles"
         )
 
-# Handle XLSX File Upload
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await update.message.document.get_file()
     file_path = 'numbers.xlsx'
@@ -114,7 +110,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_lines = []
 
     for row in sheet.iter_rows(min_row=2, values_only=True):
-        number = str(row[0])
+        number = row[0]
+
+        if not number:
+            continue  # Skip empty cells
+
+        number = str(number).strip()
         if not number.startswith('+'):
             number = '+' + number
 
@@ -133,15 +134,14 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             message_lines.append(f"`{number}` - {status}")
             total_checked += 1
-            await asyncio.sleep(1)  # Delay to avoid limits
+            await asyncio.sleep(1)
 
-        except Exception as e:
+        except Exception:
             message_lines.append(f"`{number}` - ❌ Error")
 
     await client.disconnect()
     os.remove(file_path)
 
-    # Save config
     config['last_summary'] = {
         'total_checked': total_checked,
         'registered_count': registered_count,
@@ -167,15 +167,17 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                         caption="📊 Result XLSX file.")
     os.remove(result_xlsx)
 
-# Main Entry Point
 if __name__ == '__main__':
     import logging
     logging.basicConfig(level=logging.INFO)
+
+    # Bind to Render port
+    port = int(os.getenv('PORT', 8443))
 
     app = ApplicationBuilder().token(os.getenv('BOT_TOKEN')).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 
-    print('Bot is running...')
+    print(f'Bot is running on port {port}...')
     app.run_polling()
