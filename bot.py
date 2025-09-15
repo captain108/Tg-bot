@@ -1,9 +1,9 @@
-import json
 import os
+import json
 import asyncio
 import openpyxl
-from datetime import datetime, timedelta
 from telethon import TelegramClient, functions, types
+from telethon.sessions import StringSession
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 )
@@ -13,23 +13,27 @@ from telegram.ext import (
 )
 
 # ====== CONFIGURATION =======
-API_ID = 'YOUR_TELEGRAM_API_ID'
-API_HASH = 'YOUR_TELEGRAM_API_HASH'
-BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
-PHONE_NUMBER = 'YOUR_PHONE_NUMBER'
+API_ID = int(os.getenv('API_ID'))
+API_HASH = os.getenv('API_HASH')
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+STRING_SESSION = os.getenv('STRING_SESSION')
+PHONE_NUMBER = os.getenv('PHONE_NUMBER')  # Optional, but recommended
 
-client = TelegramClient('session_name', API_ID, API_HASH)
+client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 CONFIG_FILE = 'config.json'
 
-# Helper to load config
+# Helper functions
 def load_config():
     if not os.path.exists(CONFIG_FILE):
-        return {"tick_style": "✅", "last_summary": {"total_checked":0, "registered_count":0, "non_registered_count":0}, "non_registered_numbers":[]}
+        return {
+            "tick_style": "✅",
+            "last_summary": {"total_checked":0, "registered_count":0, "non_registered_count":0},
+            "non_registered_numbers": []
+        }
     with open(CONFIG_FILE, 'r') as f:
         return json.load(f)
 
-# Helper to save config
 def save_config(config):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=4)
@@ -62,7 +66,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(message, reply_markup=reply_markup)
 
-# Callback Query Handler
+# Button Handler
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -76,28 +80,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for num in config['non_registered_numbers']:
                 f.write(f"{num}\n")
         await query.message.reply_document(document=InputFile(txt_path),
-                                           caption="📄 Here is the Non-Registered Numbers TXT file.")
+                                           caption="📄 Non-Registered Numbers TXT File.")
         os.remove(txt_path)
     elif query.data == 'toggle_style':
-        new_tick = '✔️' if config['tick_style'] == '✅' else '✅'
-        config['tick_style'] = new_tick
+        config['tick_style'] = '✔️' if config['tick_style'] == '✅' else '✅'
         save_config(config)
-        await query.message.reply_text(f"✅ Style toggled to: {new_tick}")
+        await query.message.reply_text(f"✅ Style toggled to: {config['tick_style']}")
     elif query.data == 'help':
         await query.message.reply_text(
-            "Usage Guide:\n"
-            "📥 Upload a XLSX file (first column: numbers)\n"
-            "📄 Download a TXT of non-registered numbers\n"
-            "⚙️ Toggle between ✅ and ✔️ styles"
+            "📚 Usage Guide:\n"
+            "📥 Upload a XLSX file (one number per row in the first column)\n"
+            "📄 Download TXT file of non-registered numbers\n"
+            "⚙️ Toggle between ✅ and ✔️ tick styles"
         )
 
-# Handle XLSX file
+# Handle XLSX File Upload
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await update.message.document.get_file()
     file_path = 'numbers.xlsx'
     await file.download_to_drive(file_path)
 
-    await update.message.reply_text('⏳ Processing the number list, please wait...')
+    await update.message.reply_text('⏳ Processing numbers, please wait...')
 
     config = load_config()
     tick = config['tick_style']
@@ -130,7 +133,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             message_lines.append(f"`{number}` - {status}")
             total_checked += 1
-            await asyncio.sleep(1)  # Delay for safety
+            await asyncio.sleep(1)  # Delay to avoid limits
 
         except Exception as e:
             message_lines.append(f"`{number}` - ❌ Error")
@@ -138,7 +141,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await client.disconnect()
     os.remove(file_path)
 
-    # Update config
+    # Save config
     config['last_summary'] = {
         'total_checked': total_checked,
         'registered_count': registered_count,
@@ -147,7 +150,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config['non_registered_numbers'] = non_registered_numbers
     save_config(config)
 
-    # Send result summary + file
     result_text = "\n".join(message_lines)
     await update.message.reply_markdown(f"✅ Check complete! Results:\n\n{result_text}")
 
@@ -162,15 +164,15 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     output_wb.save(result_xlsx)
     await update.message.reply_document(document=InputFile(result_xlsx),
-                                        caption="📊 Complete result XLSX file.")
+                                        caption="📊 Result XLSX file.")
     os.remove(result_xlsx)
 
-# Main Entry
+# Main Entry Point
 if __name__ == '__main__':
     import logging
     logging.basicConfig(level=logging.INFO)
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(os.getenv('BOT_TOKEN')).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
