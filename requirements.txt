@@ -1,4 +1,2 @@
-python-telegram-bot[webhooks]==20.3
-telethon==1.29.0
+python-telegram-bot==20.3
 openpyxl==3.1.2
-requests==2.31.0
