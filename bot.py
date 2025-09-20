@@ -16,7 +16,7 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g. https://your-app.onrender.com
 
 client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
-# === START ===
+# === START COMMAND ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤖 Welcome to **Telegram XLSX Number Checker!**\n\n"
@@ -52,11 +52,14 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❌ Non-Registered Only", callback_data=f"nreg|{filepath}")],
         [InlineKeyboardButton("📊 All Results (✅/❌)", callback_data=f"all|{filepath}")]
     ]
+
     if has_message:
         buttons.insert(2, [InlineKeyboardButton("💬 Extract Only Messages", callback_data=f"onlymsg|{filepath}")])
 
-    await update.message.reply_text("✨ File received! Choose an option:", 
-                                    reply_markup=InlineKeyboardMarkup(buttons))
+    await update.message.reply_text(
+        "✨ File received! Choose an option:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 
 # === BUTTON HANDLER ===
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -66,7 +69,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     df = pd.read_excel(filepath)
     numbers = df.iloc[:, 0].astype(str).tolist()
-    results = []
 
     if action == "txt":
         outpath = filepath.replace(".xlsx", ".txt")
@@ -91,10 +93,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_document(open(outpath, "rb"))
 
     elif action in ["reg", "nreg", "all"]:
-        await query.message.reply_text("⏳ Checking Telegram registration...")
+        await query.message.reply_text("⏳ Checking Telegram registration, please wait...")
 
         await client.start()
         registered, non_registered = [], []
+
         try:
             for num in numbers:
                 contact = InputPhoneContact(client_id=0, phone=num, first_name="Check", last_name="")
@@ -110,34 +113,37 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             await client.disconnect()
 
-        # Summary stats
-        summary = f"""
-📊 Summary:
-✔️ Total: {len(numbers)}
-✅ Registered: {len(registered)}
-❌ Non-Registered: {len(non_registered)}
-"""
+        summary = (
+            f"📊 Summary:\n"
+            f"✔️ Total: {len(numbers)}\n"
+            f"✅ Registered: {len(registered)}\n"
+            f"❌ Non-Registered: {len(non_registered)}"
+        )
+
         if action == "reg":
             msg = "\n".join(registered[:50]) or "⚠️ No registered numbers."
-            await query.message.reply_text(f"✅ Registered:\n\n{msg}\n{summary}")
-            with open(filepath.replace(".xlsx", "_registered.txt"), "w") as f:
+            await query.message.reply_text(f"✅ Registered:\n\n{msg}\n\n{summary}")
+            outpath = filepath.replace(".xlsx", "_registered.txt")
+            with open(outpath, "w") as f:
                 f.write("\n".join(registered))
-            await query.message.reply_document(open(filepath.replace(".xlsx", "_registered.txt"), "rb"))
+            await query.message.reply_document(open(outpath, "rb"))
 
         elif action == "nreg":
             msg = "\n".join(non_registered[:50]) or "⚠️ No non-registered numbers."
-            await query.message.reply_text(f"❌ Non-Registered:\n\n{msg}\n{summary}")
-            with open(filepath.replace(".xlsx", "_nonregistered.txt"), "w") as f:
+            await query.message.reply_text(f"❌ Non-Registered:\n\n{msg}\n\n{summary}")
+            outpath = filepath.replace(".xlsx", "_nonregistered.txt")
+            with open(outpath, "w") as f:
                 f.write("\n".join(non_registered))
-            await query.message.reply_document(open(filepath.replace(".xlsx", "_nonregistered.txt"), "rb"))
+            await query.message.reply_document(open(outpath, "rb"))
 
         elif action == "all":
             merged = registered + non_registered
             msg = "\n".join(merged[:50]) or "⚠️ No numbers found."
-            await query.message.reply_text(f"📊 All Results:\n\n{msg}\n{summary}")
-            with open(filepath.replace(".xlsx", "_checked.txt"), "w") as f:
+            await query.message.reply_text(f"📊 All Results:\n\n{msg}\n\n{summary}")
+            outpath = filepath.replace(".xlsx", "_checked.txt")
+            with open(outpath, "w") as f:
                 f.write("\n".join(merged))
-            await query.message.reply_document(open(filepath.replace(".xlsx", "_checked.txt"), "rb"))
+            await query.message.reply_document(open(outpath, "rb"))
 
 # === MAIN ===
 def main():
@@ -152,13 +158,6 @@ def main():
     app.run_webhook(
         listen="0.0.0.0",
         port=port,
-        url_path=BOT_TOKEN,
-        webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}"
-    )
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())        port=port,
         url_path=BOT_TOKEN,
         webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}"
     )
