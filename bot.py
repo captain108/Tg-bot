@@ -1,151 +1,154 @@
 import os
-import json
-import openpyxl
-from telegram import Update, InputFile
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
-)
+import pandas as pd
+from telethon import TelegramClient
+from telethon.tl.functions.contacts import ImportContactsRequest, DeleteContactsRequest
+from telethon.tl.types import InputPhoneContact
+from telethon.errors import PhoneNumberInvalidError
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
+# === CONFIG ===
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+SESSION_NAME = "checker_session"
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g. https://your-app.onrender.com
 
-CONFIG_FILE = 'config.json'
+client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
-def load_config():
-    if not os.path.exists(CONFIG_FILE):
-        return {
-            "tick_style": "✅",
-            "last_summary": {"total_checked": 0, "registered_count": 0, "non_registered_count": 0},
-            "non_registered_numbers": []
-        }
-    with open(CONFIG_FILE, 'r') as f:
-        return json.load(f)
-
-def save_config(config):
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=4)
-
-
+# === START ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    config = load_config()
-    summary = config['last_summary']
-    tick = config['tick_style']
-
-    message = (
-        "🤖 Welcome to Number Checker Bot!\n\n"
-        "📥 Send me an XLSX or TXT file (one phone number per row or separated by spaces).\n"
-        "📄 Use /get_txt to get non-registered numbers\n"
-        "⚙️ Use /toggle_style to switch ✅ / ✔️ style\n\n"
-        f"✅ Last Check Summary:\n"
-        f"{tick} {summary['total_checked']} numbers checked\n"
-        f"{tick} {summary['registered_count']} registered | "
-        f"{tick} {summary['non_registered_count']} non-registered"
+    await update.message.reply_text(
+        "🤖 Welcome to **Telegram XLSX Number Checker!**\n\n"
+        "📥 Send me an `.xlsx` file with numbers (and messages if any).\n\n"
+        "I can:\n"
+        "📄 Export TXT\n"
+        "🔢 Extract numbers/messages\n"
+        "✅ Show registered / ❌ non-registered\n"
+        "📊 Show merged results ✅❌",
+        parse_mode="Markdown"
     )
-    await update.message.reply_text(message)
 
-
-async def toggle_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    config = load_config()
-    config['tick_style'] = '✔️' if config['tick_style'] == '✅' else '✅'
-    save_config(config)
-    await update.message.reply_text(f"✅ Tick style toggled to: {config['tick_style']}")
-
-
-async def get_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    config = load_config()
-    txt_path = 'non_registered_numbers.txt'
-    with open(txt_path, 'w') as f:
-        for num in config['non_registered_numbers']:
-            f.write(f"{num}\n")
-    await update.message.reply_document(document=InputFile(txt_path), caption="📄 Non-Registered Numbers")
-    os.remove(txt_path)
-
-
-async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# === FILE HANDLER ===
+async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await update.message.document.get_file()
-    file_path = update.message.document.file_name
+    filepath = f"downloads/{update.message.document.file_name}"
+    os.makedirs("downloads", exist_ok=True)
+    await file.download_to_drive(filepath)
 
-    await file.download_to_drive(file_path)
-    await update.message.reply_text('⏳ Processing numbers, please wait...')
+    try:
+        df = pd.read_excel(filepath)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error reading file: {e}")
+        return
 
-    config = load_config()
-    tick = config['tick_style']
-    non_registered_numbers = []
-    total_checked = 0
-    registered_count = 0
-    message_lines = []
-    numbers = []
+    has_message = any("message" in c.lower() for c in df.columns)
 
-    # Read numbers from file
-    if file_path.endswith('.xlsx'):
-        wb = openpyxl.load_workbook(file_path)
-        sheet = wb.active
-        for row in sheet.iter_rows(min_row=1, values_only=True):
-            number = row[0]
-            if number:
-                numbers.append(str(number).strip())
-        wb.close()
-    elif file_path.endswith('.txt'):
-        with open(file_path, 'r') as f:
-            content = f.read()
-            for part in content.split():
-                if part.strip():
-                    numbers.append(part.strip())
+    buttons = [
+        [InlineKeyboardButton("📄 Export TXT", callback_data=f"txt|{filepath}")],
+        [InlineKeyboardButton("💬 Show Numbers in Chat", callback_data=f"chat|{filepath}")],
+        [InlineKeyboardButton("🔢 Extract Only Numbers", callback_data=f"onlynum|{filepath}")],
+        [InlineKeyboardButton("✅ Registered Only", callback_data=f"reg|{filepath}")],
+        [InlineKeyboardButton("❌ Non-Registered Only", callback_data=f"nreg|{filepath}")],
+        [InlineKeyboardButton("📊 All Results (✅/❌)", callback_data=f"all|{filepath}")]
+    ]
+    if has_message:
+        buttons.insert(2, [InlineKeyboardButton("💬 Extract Only Messages", callback_data=f"onlymsg|{filepath}")])
 
-    for number in numbers:
-        if not number.startswith('+'):
-            number = '+' + number
+    await update.message.reply_text("✨ File received! Choose an option:", 
+                                    reply_markup=InlineKeyboardMarkup(buttons))
 
-        # Dummy check logic (replace with real check)
-        if len(number) >= 10:
-            registered_count += 1
-            status = f"{tick} Registered"
-        else:
-            non_registered_numbers.append(number)
-            status = "❌ Not Registered"
+# === BUTTON HANDLER ===
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    action, filepath = query.data.split("|", 1)
 
-        message_lines.append(f"`{number}` - {status}")
-        total_checked += 1
+    df = pd.read_excel(filepath)
+    numbers = df.iloc[:, 0].astype(str).tolist()
+    results = []
 
-    os.remove(file_path)
+    if action == "txt":
+        outpath = filepath.replace(".xlsx", ".txt")
+        df.to_csv(outpath, index=False, header=False, sep="\t")
+        await query.message.reply_document(open(outpath, "rb"))
 
-    config['last_summary'] = {
-        'total_checked': total_checked,
-        'registered_count': registered_count,
-        'non_registered_count': len(non_registered_numbers)
-    }
-    config['non_registered_numbers'] = non_registered_numbers
-    save_config(config)
+    elif action == "chat":
+        preview = "\n".join(numbers[:50])
+        await query.message.reply_text(f"📄 First numbers:\n\n{preview}")
 
-    result_text = "\n".join(message_lines)
-    await update.message.reply_markdown(f"✅ Check complete! Results:\n\n{result_text}")
+    elif action == "onlynum":
+        outpath = filepath.replace(".xlsx", "_numbers.txt")
+        with open(outpath, "w") as f:
+            f.write("\n".join(numbers))
+        await query.message.reply_document(open(outpath, "rb"))
 
-    result_xlsx = 'checked_numbers.xlsx'
-    output_wb = openpyxl.Workbook()
-    output_sheet = output_wb.active
-    output_sheet.append(['Phone Number', 'Status'])
+    elif action == "onlymsg":
+        messages = df.iloc[:, 1].astype(str).tolist()
+        outpath = filepath.replace(".xlsx", "_messages.txt")
+        with open(outpath, "w") as f:
+            f.write("\n".join(messages))
+        await query.message.reply_document(open(outpath, "rb"))
 
-    for line in message_lines:
-        parts = line.split(' - ')
-        output_sheet.append([parts[0].strip('`'), parts[1]])
+    elif action in ["reg", "nreg", "all"]:
+        await query.message.reply_text("⏳ Checking Telegram registration...")
 
-    output_wb.save(result_xlsx)
-    await update.message.reply_document(document=InputFile(result_xlsx), caption="📊 Result XLSX file.")
-    os.remove(result_xlsx)
+        await client.start()
+        registered, non_registered = [], []
+        try:
+            for num in numbers:
+                contact = InputPhoneContact(client_id=0, phone=num, first_name="Check", last_name="")
+                imported, = await client(ImportContactsRequest([contact]))
+                user = imported.users[0] if imported.users else None
+                if user:
+                    registered.append(f"✅ {num}")
+                    await client(DeleteContactsRequest([user.id]))
+                else:
+                    non_registered.append(f"❌ {num}")
+        except PhoneNumberInvalidError:
+            non_registered.append("⚠️ Invalid format number")
+        finally:
+            await client.disconnect()
 
+        if action == "reg":
+            msg = "\n".join(registered[:50]) or "⚠️ No registered numbers."
+            await query.message.reply_text(f"✅ Registered:\n\n{msg}")
+            with open(filepath.replace(".xlsx", "_registered.txt"), "w") as f:
+                f.write("\n".join(registered))
+            await query.message.reply_document(open(filepath.replace(".xlsx", "_registered.txt"), "rb"))
 
-if __name__ == '__main__':
-    BOT_TOKEN = os.environ.get('BOT_TOKEN')
+        elif action == "nreg":
+            msg = "\n".join(non_registered[:50]) or "⚠️ No non-registered numbers."
+            await query.message.reply_text(f"❌ Non-Registered:\n\n{msg}")
+            with open(filepath.replace(".xlsx", "_nonregistered.txt"), "w") as f:
+                f.write("\n".join(non_registered))
+            await query.message.reply_document(open(filepath.replace(".xlsx", "_nonregistered.txt"), "rb"))
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+        elif action == "all":
+            merged = registered + non_registered
+            msg = "\n".join(merged[:50]) or "⚠️ No numbers found."
+            await query.message.reply_text(f"📊 All Results:\n\n{msg}")
+            with open(filepath.replace(".xlsx", "_checked.txt"), "w") as f:
+                f.write("\n".join(merged))
+            await query.message.reply_document(open(filepath.replace(".xlsx", "_checked.txt"), "rb"))
 
-    app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('toggle_style', toggle_style))
-    app.add_handler(CommandHandler('get_txt', get_txt))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+# === MAIN ===
+def main():
+    port = int(os.getenv("PORT", 8080))
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    print("✅ Bot is running in polling mode...")
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+    app.add_handler(CallbackQueryHandler(button))
 
-    app.run_polling()
+    # Use webhook mode for Render
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=BOT_TOKEN,
+        webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}"
+    )
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
