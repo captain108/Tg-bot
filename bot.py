@@ -110,16 +110,23 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             await client.disconnect()
 
+        # Summary stats
+        summary = f"""
+📊 Summary:
+✔️ Total: {len(numbers)}
+✅ Registered: {len(registered)}
+❌ Non-Registered: {len(non_registered)}
+"""
         if action == "reg":
             msg = "\n".join(registered[:50]) or "⚠️ No registered numbers."
-            await query.message.reply_text(f"✅ Registered:\n\n{msg}")
+            await query.message.reply_text(f"✅ Registered:\n\n{msg}\n{summary}")
             with open(filepath.replace(".xlsx", "_registered.txt"), "w") as f:
                 f.write("\n".join(registered))
             await query.message.reply_document(open(filepath.replace(".xlsx", "_registered.txt"), "rb"))
 
         elif action == "nreg":
             msg = "\n".join(non_registered[:50]) or "⚠️ No non-registered numbers."
-            await query.message.reply_text(f"❌ Non-Registered:\n\n{msg}")
+            await query.message.reply_text(f"❌ Non-Registered:\n\n{msg}\n{summary}")
             with open(filepath.replace(".xlsx", "_nonregistered.txt"), "w") as f:
                 f.write("\n".join(non_registered))
             await query.message.reply_document(open(filepath.replace(".xlsx", "_nonregistered.txt"), "rb"))
@@ -127,7 +134,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif action == "all":
             merged = registered + non_registered
             msg = "\n".join(merged[:50]) or "⚠️ No numbers found."
-            await query.message.reply_text(f"📊 All Results:\n\n{msg}")
+            await query.message.reply_text(f"📊 All Results:\n\n{msg}\n{summary}")
             with open(filepath.replace(".xlsx", "_checked.txt"), "w") as f:
                 f.write("\n".join(merged))
             await query.message.reply_document(open(filepath.replace(".xlsx", "_checked.txt"), "rb"))
@@ -145,6 +152,13 @@ def main():
     app.run_webhook(
         listen="0.0.0.0",
         port=port,
+        url_path=BOT_TOKEN,
+        webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}"
+    )
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())        port=port,
         url_path=BOT_TOKEN,
         webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}"
     )
